@@ -1,8 +1,16 @@
 {
   "profiles": {
-    "OutlookCalendarSync": {
+    "Delete only": {
       "commandName": "Project",
-      "commandLineArgs": "-d 14"
+      "commandLineArgs": "-r"
+    },
+    "fixed start date (test)": {
+      "commandName": "Project",
+      "commandLineArgs": "-d 21 -s 2025-04-23 -t"
+    },
+    "actual update": {
+      "commandName": "Project",
+      "commandLineArgs": "-d 21"
     }
   }
 }
