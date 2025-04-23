@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "OutlookCalendarSync": {
+      "commandName": "Project",
+      "commandLineArgs": "-d 14"
+    }
+  }
+}
