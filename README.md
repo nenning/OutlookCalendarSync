@@ -167,4 +167,4 @@ Please follow the existing coding style, include unit tests for new logic, and u
 
 ## License
 
-[MIT License](LICENSE)
+[MIT License](LICENSE.txt)
