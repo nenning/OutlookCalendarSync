@@ -301,10 +301,25 @@ void SynchronizeAllAccounts(
         }
 
         // --- Pass 3: Delete stale blockers from the current target account ---
-        var realMeetingKeys = new HashSet<(string, DateTime)>(allRealMeetings.Keys);
         foreach (var (key, staleBlocker) in existingBlockers)
         {
-            if (!realMeetingKeys.Contains(key))
+            bool shouldDelete = false;
+            if (allRealMeetings.TryGetValue(key, out var realMeeting))
+            {
+                if (realMeeting.AllDayEvent ||
+                    realMeeting.BusyStatus != Outlook.OlBusyStatus.olBusy ||
+                    (realMeeting.Subject ?? string.Empty).IndexOf("block", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    realMeeting.Start == realMeeting.End)
+                {
+                    shouldDelete = true;
+                }
+            }
+            else
+            {
+                shouldDelete = true;
+            }
+
+            if (shouldDelete)
             {
                 if (isTestMode)
                 {
