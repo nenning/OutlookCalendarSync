@@ -1,6 +1,6 @@
 # Outlook Calendar Sync Tool
 
-**A CLI-based .NET / C# console application to sync Office 365 tenant calendars in classic Outlook.**
+**A .NET console application to sync appointments between all calendars in classic Outlook.**
 
 ---
 
