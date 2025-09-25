@@ -98,25 +98,22 @@ rootCommand.SetHandler(async (
 return await rootCommand.InvokeAsync(args);
 
 /// <summary>
-/// Executes two-way sync between the first two Outlook accounts over the specified window.
+/// Executes n-way sync among all Outlook accounts over the specified window.
 /// </summary>
 void ExecuteFullSync(DateTime startDate, int daysAhead, bool isTestMode)
 {
-    DateTime endDate = startDate.AddDays(daysAhead);
     Outlook.Application? outlookApplication = null;
     try
     {
         outlookApplication = new Outlook.Application();
-        var accountList = outlookApplication.Session.Accounts.Cast<Outlook.Account>().ToList();
-        if (accountList.Count < 2)
+        var accounts = outlookApplication.Session.Accounts.Cast<Outlook.Account>().ToList();
+        if (accounts.Count < 2)
         {
-            Console.WriteLine("Requires two accounts in classic Outlook.");
+            Console.WriteLine("Requires at least two accounts in classic Outlook for synchronization.");
             return;
         }
 
-        // Sync calendars in both directions
-        SynchronizeBetweenAccounts(accountList[0], accountList[1], startDate, endDate, isTestMode);
-        SynchronizeBetweenAccounts(accountList[1], accountList[0], startDate, endDate, isTestMode);
+        SynchronizeAllAccounts(accounts, startDate, startDate.AddDays(daysAhead), isTestMode);
     }
     catch (System.Exception exception)
     {
@@ -142,7 +139,7 @@ void DeleteAllBlockers(bool isTestMode)
         if (accountList.Count < 2)
             return;
 
-        foreach (var account in accountList.Take(2))
+        foreach (var account in accountList)
         {
             var calendarFolder = account.DeliveryStore.GetDefaultFolder(Outlook.OlDefaultFolders.olFolderCalendar);
             var calendarItems = calendarFolder.Items;
@@ -188,152 +185,200 @@ void DeleteAllBlockers(bool isTestMode)
 }
 
 /// <summary>
-/// Synchronizes events from a source account to a target account within a date range.
+/// Synchronizes events among a list of Outlook accounts for a given date range.
 /// </summary>
-void SynchronizeBetweenAccounts(
-    Outlook.Account sourceAccount,
-    Outlook.Account targetAccount,
+void SynchronizeAllAccounts(
+    List<Outlook.Account> accounts,
     DateTime startDate,
     DateTime endDate,
     bool isTestMode)
 {
-    string dateFilter = $"[Start] >= '{startDate:g}' AND [Start] <= '{endDate:g}'";
-    Console.WriteLine($"\nSync {sourceAccount.DisplayName} -> {targetAccount.DisplayName} " +
-                      $"({startDate:yyyy-MM-dd} to {endDate:yyyy-MM-dd})" +
-                      $"{(isTestMode ? " [TEST MODE]" : string.Empty)}");
+    Console.WriteLine($"\nSyncing ({startDate:yyyy-MM-dd} to {endDate:yyyy-MM-dd}) {(isTestMode ? " [TEST MODE]" : string.Empty)}");
 
-    var sourceCalendarFolder = sourceAccount.DeliveryStore.GetDefaultFolder(Outlook.OlDefaultFolders.olFolderCalendar);
-    var targetCalendarFolder = targetAccount.DeliveryStore.GetDefaultFolder(Outlook.OlDefaultFolders.olFolderCalendar);
+    string dateFilter = $"[Start] >= '{startDate:g}' AND [End] <= '{endDate:g}'";
 
-    var sourceCalendarItems = sourceCalendarFolder.Items;
-    sourceCalendarItems.Sort("[Start]");
-    sourceCalendarItems.IncludeRecurrences = true;
-    var targetCalendarItems = targetCalendarFolder.Items;
-    targetCalendarItems.Sort("[Start]");
-    targetCalendarItems.IncludeRecurrences = true;
+    // --- Pass 1: Gather all real meetings from all accounts ---
+    var allRealMeetings = new Dictionary<(string, DateTime), Outlook.AppointmentItem>();
+    var allRealMeetingIdsByAccount = accounts.ToDictionary(acc => acc.DisplayName, _ => new HashSet<string>());
 
-    var sourceEventCollection = sourceCalendarItems.Restrict(dateFilter);
-    var targetEventCollection = targetCalendarItems.Restrict(dateFilter);
-
-    // Build list of real meetings in target calendar\    
-    var realMeetingsInTargetList = targetEventCollection
-        .Cast<Outlook.AppointmentItem>()
-        .Where(appointment => appointment.UserProperties.Find(BlockerTag) == null)
-        .Select(appointment => new
-        {
-            appointment.Start,
-            appointment.End,
-            appointment.Subject
-        })
-        .ToList();
-
-    // Map existing blockers by unique key
-    var existingBlockersMap = targetEventCollection
-        .Cast<Outlook.AppointmentItem>()
-        .Where(appointment => appointment.UserProperties.Find(BlockerTag) != null)
-        .ToDictionary(
-            appointment => $"{appointment.UserProperties[BlockerTag].Value}|{appointment.Start:o}",
-            appointment => appointment
-        );
-
-    foreach (object rawEvent in sourceEventCollection)
+    foreach (var account in accounts)
     {
-        if (rawEvent is not Outlook.AppointmentItem appointmentItem)
-            continue;
+        var calendar = account.DeliveryStore.GetDefaultFolder(Outlook.OlDefaultFolders.olFolderCalendar);
+        var calendarItems = calendar.Items;
+        calendarItems.IncludeRecurrences = true;
+        calendarItems.Sort("[Start]");
+        var appointments = calendarItems.Restrict(dateFilter);
 
-        try
+        foreach (Outlook.AppointmentItem appt in appointments)
         {
-            // Skip if already blocked or not busy/all-day
-            if (appointmentItem.UserProperties.Find(BlockerTag) != null)
-                continue;
-            if (appointmentItem.AllDayEvent || appointmentItem.BusyStatus != Outlook.OlBusyStatus.olBusy)
-                continue;
-
-            string rawSubject = appointmentItem.Subject ?? string.Empty;
-            string normalizedSubject = NormalizeSubject(rawSubject);
-
-            // Skip meetings titled exactly "block" or "blocker"
-            if (string.Equals(normalizedSubject, "block", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(normalizedSubject, "blocker", StringComparison.OrdinalIgnoreCase))
+            if (appt.UserProperties.Find(BlockerTag) == null)
             {
-                continue;
-            }
-
-            DateTime occurrenceStart = appointmentItem.Start;
-            DateTime occurrenceEnd = appointmentItem.End;
-
-            // Skip zero-duration
-            if (occurrenceEnd <= occurrenceStart)
-                continue;
-
-            // Skip outside window
-            if (occurrenceStart < startDate || occurrenceStart > endDate)
-                continue;
-
-            string uniqueKey = $"{appointmentItem.GlobalAppointmentID}|{occurrenceStart:o}";
-            if (existingBlockersMap.Remove(uniqueKey))
-                continue;
-
-            // Check for equivalent real meeting by suffix comparison
-            bool equivalentMeetingExists = realMeetingsInTargetList.Any(meeting =>
-            {
-                if (meeting.Start != occurrenceStart || meeting.End != occurrenceEnd)
-                    return false;
-                string targetSubject = NormalizeSubject(meeting.Subject);
-                int suffixLength = Math.Min(targetSubject.Length, normalizedSubject.Length);
-                string sourceSuffix = normalizedSubject[^suffixLength..];
-                string targetSuffix = targetSubject[^suffixLength..];
-                return string.Equals(sourceSuffix, targetSuffix, StringComparison.OrdinalIgnoreCase);
-            });
-
-            if (equivalentMeetingExists)
-                continue;
-
-            // Create blocker or simulate
-            if (isTestMode)
-            {
-                Console.WriteLine($"[Test] Would create blocker at {occurrenceStart} ('{rawSubject}')");
+                allRealMeetings[(appt.GlobalAppointmentID, appt.Start)] = appt;
+                allRealMeetingIdsByAccount[account.DisplayName].Add(appt.GlobalAppointmentID);
             }
             else
             {
-                Console.WriteLine($"Creating blocker at {occurrenceStart} ('{rawSubject}')");
-                var blockerAppointment = (Outlook.AppointmentItem)
-                    targetCalendarFolder.Items.Add(Outlook.OlItemType.olAppointmentItem);
-                blockerAppointment.Subject = "blocker";
-                blockerAppointment.Start = occurrenceStart;
-                blockerAppointment.End = occurrenceEnd;
-                blockerAppointment.AllDayEvent = false;
-                blockerAppointment.BusyStatus = Outlook.OlBusyStatus.olBusy;
-                blockerAppointment.ReminderSet = false;
-                blockerAppointment.UserProperties
-                    .Add(BlockerTag, Outlook.OlUserPropertyType.olText)
-                    .Value = appointmentItem.GlobalAppointmentID;
-                blockerAppointment.Save();
-                Marshal.ReleaseComObject(blockerAppointment);
+                Marshal.ReleaseComObject(appt); // Release blockers we find along the way
             }
         }
-        finally
-        {
-            Marshal.ReleaseComObject(appointmentItem);
-        }
+        Marshal.ReleaseComObject(appointments);
+        Marshal.ReleaseComObject(calendarItems);
+        Marshal.ReleaseComObject(calendar);
     }
 
-    // Delete stale blockers
-    foreach (var staleBlocker in existingBlockersMap.Values)
+    Console.WriteLine($"Found {allRealMeetings.Count} total real meetings across {accounts.Count} accounts.");
+
+    // --- Pass 2: Create missing blockers in each account ---
+    foreach (var targetAccount in accounts)
     {
-        if (isTestMode)
-            Console.WriteLine($"[Test] Would delete stale blocker at {staleBlocker.Start}");
-        else
+        Console.WriteLine($"\nSyncing blockers for {targetAccount.DisplayName}{(isTestMode ? " [TEST MODE]" : string.Empty)}");
+        var targetCalendar = targetAccount.DeliveryStore.GetDefaultFolder(Outlook.OlDefaultFolders.olFolderCalendar);
+        var targetItems = targetCalendar.Items;
+        targetItems.IncludeRecurrences = true;
+        targetItems.Sort("[Start]");
+        var targetAppointments = targetItems.Restrict(dateFilter);
+
+        var existingBlockers = targetAppointments
+            .Cast<Outlook.AppointmentItem>()
+            .Where(a => a.UserProperties.Find(BlockerTag) != null)
+            .ToDictionary(a => ((string)a.UserProperties[BlockerTag].Value, a.Start));
+
+        // For every real meeting that exists, ensure a blocker exists in the current target account,
+        // unless the meeting belongs to this account.
+        foreach (var realMeeting in allRealMeetings.Values)
         {
-            Console.WriteLine($"Deleting stale blocker at {staleBlocker.Start}");
-            staleBlocker.Delete();
+            string globalId = realMeeting.GlobalAppointmentID;
+
+            // Don't create a blocker in the meeting's own calendar
+            if (allRealMeetingIdsByAccount[targetAccount.DisplayName].Contains(globalId))
+            {
+                continue;
+            }
+
+            // If a valid blocker already exists, do nothing.
+            if (existingBlockers.ContainsKey((globalId, realMeeting.Start)))
+            {
+                continue;
+            }
+
+            // Skip all-day events, non-busy meetings, or subjects containing "block"
+            if (realMeeting.AllDayEvent ||
+                realMeeting.BusyStatus != Outlook.OlBusyStatus.olBusy ||
+                (realMeeting.Subject ?? string.Empty).IndexOf("block", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                realMeeting.Start == realMeeting.End)
+            {
+                continue;
+            }
+            
+            // Skip if an equivalent real meeting already exists in the target calendar
+            // This handles cases where the user is an attendee of the same meeting on multiple accounts.
+            if (FindEquivalentMeeting(realMeeting, targetAccount, dateFilter))
+            {
+                 Console.WriteLine($"  Skipping blocker creation for '{realMeeting.Subject}' at {realMeeting.Start:g} (equivalent meeting exists).");
+                 continue;
+            }
+
+
+            // Create the blocker
+            if (isTestMode)
+            {
+                Console.WriteLine($"  [Test] Would create blocker for '{realMeeting.Subject}' at {realMeeting.Start:g}");
+            }
+            else
+            {
+                Console.WriteLine($"  Creating blocker for '{realMeeting.Subject}' at {realMeeting.Start:g}");
+                var blocker = (Outlook.AppointmentItem)targetItems.Add(Outlook.OlItemType.olAppointmentItem);
+                blocker.Subject = "blocker";
+                blocker.Start = realMeeting.Start;
+                blocker.End = realMeeting.End;
+                blocker.AllDayEvent = realMeeting.AllDayEvent;
+                blocker.BusyStatus = Outlook.OlBusyStatus.olBusy;
+                blocker.ReminderSet = false;
+                blocker.UserProperties.Add(BlockerTag, Outlook.OlUserPropertyType.olText).Value = globalId;
+                blocker.Save();
+                Marshal.ReleaseComObject(blocker);
+            }
         }
-        Marshal.ReleaseComObject(staleBlocker);
+
+        // --- Pass 3: Delete stale blockers from the current target account ---
+        var realMeetingKeys = new HashSet<(string, DateTime)>(allRealMeetings.Keys);
+        foreach (var (key, staleBlocker) in existingBlockers)
+        {
+            if (!realMeetingKeys.Contains(key))
+            {
+                if (isTestMode)
+                {
+                    Console.WriteLine($"  [Test] Would delete stale blocker at {staleBlocker.Start:g}");
+                }
+                else
+                {
+                    Console.WriteLine($"  Deleting stale blocker at {staleBlocker.Start:g}");
+                    staleBlocker.Delete();
+                }
+            }
+            Marshal.ReleaseComObject(staleBlocker);
+        }
+        
+        Marshal.ReleaseComObject(targetAppointments);
+        Marshal.ReleaseComObject(targetItems);
+        Marshal.ReleaseComObject(targetCalendar);
     }
 
-    // Cleanup COM objects
-    Marshal.ReleaseComObject(sourceEventCollection);
-    Marshal.ReleaseComObject(sourceCalendarItems);
-    Marshal.ReleaseComObject(targetEventCollection);
-    Marshal.ReleaseComObject(targetCalendarItems);
+    // Release the real meetings gathered in Pass 1
+    foreach (var meeting in allRealMeetings.Values)
+    {
+        Marshal.ReleaseComObject(meeting);
+    }
+}
+
+/// <summary>
+/// Finds if an equivalent real meeting exists in a given account's calendar.
+/// </summary>
+bool FindEquivalentMeeting(Outlook.AppointmentItem sourceMeeting, Outlook.Account targetAccount, string dateFilter)
+{
+    var targetCalendar = targetAccount.DeliveryStore.GetDefaultFolder(Outlook.OlDefaultFolders.olFolderCalendar);
+    var targetItems = targetCalendar.Items;
+    targetItems.IncludeRecurrences = true;
+    targetItems.Sort("[Start]");
+    var targetAppointments = targetItems.Restrict(dateFilter);
+
+    string sourceSubject = NormalizeSubject(sourceMeeting.Subject ?? string.Empty);
+
+    bool found = false;
+    foreach (Outlook.AppointmentItem targetMeeting in targetAppointments)
+    {
+        // We only care about real meetings, not blockers
+        if (targetMeeting.UserProperties.Find(BlockerTag) != null)
+        {
+            Marshal.ReleaseComObject(targetMeeting);
+            continue;
+        }
+
+        if (sourceMeeting.Start == targetMeeting.Start && sourceMeeting.End == targetMeeting.End)
+        {
+            string targetSubject = NormalizeSubject(targetMeeting.Subject ?? string.Empty);
+            int suffixLength = Math.Min(targetSubject.Length, sourceSubject.Length);
+            if (suffixLength > 0)
+            {
+                string sourceSuffix = sourceSubject[^suffixLength..];
+                string targetSuffix = targetSubject[^suffixLength..];
+                if (string.Equals(sourceSuffix, targetSuffix, StringComparison.OrdinalIgnoreCase))
+                {
+                    found = true;
+                }
+            }
+            else if (string.IsNullOrEmpty(sourceSubject) && string.IsNullOrEmpty(targetSubject))
+            {
+                found = true; // Both subjects are empty, consider them equivalent
+            }
+        }
+        Marshal.ReleaseComObject(targetMeeting);
+        if(found) break;
+    }
+
+    Marshal.ReleaseComObject(targetAppointments);
+    Marshal.ReleaseComObject(targetItems);
+    Marshal.ReleaseComObject(targetCalendar);
+
+    return found;
 }

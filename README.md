@@ -24,10 +24,11 @@
 
 ## Overview
 
-This tool automates two-way blocking of free/busy time between two Office 365 accounts in **classic** Outlook (Windows). It creates "blocker" appointments to prevent double-bookings, cleaning up stale blockers and handling recurring meetings gracefully.
+This tool automates n-way blocking of free/busy time between all Office 365 accounts in **classic** Outlook (Windows). It creates "blocker" appointments to prevent double-bookings, cleaning up stale blockers and handling recurring meetings gracefully.
 
 It runs entirely on the desktop (no cloud dependencies), uses only Outlook COM interop, and supports:
 
+- N-way sync between all configured accounts
 - Hourly or one-off syncs
 - Custom sync windows via start date and duration
 - Dry-run mode
@@ -38,7 +39,7 @@ It runs entirely on the desktop (no cloud dependencies), uses only Outlook COM i
 
 ## Features
 
-- **Two-way sync** between two tenant calendars
+- **N-way sync** between all tenant calendars
 - **Date window** specification (`--startdate`, `--days`)
 - **Background mode** (`--background`) for hourly running
 - **Test mode** (`--test`) to print operations without modifying
@@ -121,7 +122,7 @@ It runs entirely on the desktop (no cloud dependencies), uses only Outlook COM i
 1. **Entrypoint (Program.cs)** parses CLI options using System.CommandLine.
 2. **Mutex** ensures only one instance runs.
 3. **STA thread** (optional) hosts Outlook COM calls without freezing the UI.
-4. **Sync logic** in `SyncCalendarsBetweenAccounts` performs:
+4. **Sync logic** in `SynchronizeAllAccounts` performs:
    - Date filtering via `Items.Restrict`
    - Exclusion of user meetings and test-only logic
    - Expansion of recurrences with `RecurrencePattern` and exceptions
@@ -130,18 +131,17 @@ It runs entirely on the desktop (no cloud dependencies), uses only Outlook COM i
 
 ### Sync Algorithm
 
-1. **Load source & target events** in the date window.
-2. **Build lists**:
-   - Real meetings in target (exclude existing blockers)
-   - Current blockers in target (by `BlockerTag` + timestamp key)
-3. **Iterate source events**:
-   - Skip all-day, non-busy, or "block" subjects
-   - Skip any appointment already tagged (blocker-for-blocker)
-   - Expand recurring exceptions, dedupe
-   - Skip if equivalent meeting exists in target
-   - Otherwise create new blocker (`Subject = "blocker"`, no reminder)
-4. **Remove stale blockers** left after iteration.
-5. **Reset mode** deletes all tagged blockers, skipping those with `Location` set.
+1. **Gather all real meetings** from all accounts into a master list, excluding any appointments already marked as blockers.
+2. **For each account (as a target):**
+    a. **Identify existing blockers** in the target account's calendar, deduplicating any that share the same unique ID.
+    b. **Iterate through the master list of real meetings:**
+        i. Skip if the meeting belongs to the current target account.
+        ii. Skip if a valid blocker for this meeting already exists.
+        iii. Skip all-day, non-busy, or subjects containing "block".
+        iv. Skip if an equivalent real meeting already exists in the target calendar (e.g., the user is an attendee on multiple accounts).
+        v. Skip meetings with zero duration.
+        vi. If none of the above apply, create a new blocker appointment.
+    c. **Remove stale blockers:** Any blockers found in step 2a that were not matched with a real meeting in step 2b are deleted.
 
 ---
 
