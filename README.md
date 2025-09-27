@@ -1,10 +1,10 @@
-# Outlook Calendar Sync Tool
+# Outlook Calendar Sync Tool 🗓️
 
 **A .NET console application to sync appointments between all calendars in classic Outlook.**
 
 ---
 
-## Table of Contents
+## 📜 Table of Contents
 
 1. [Overview](#overview)
 2. [Features](#features)
@@ -22,9 +22,9 @@
 
 ---
 
-## Overview
+## 📝 Overview
 
-This tool automates n-way blocking of free/busy time between all Office 365 accounts in **classic** Outlook (Windows). It creates "blocker" appointments to prevent double-bookings, cleaning up stale blockers and handling recurring meetings gracefully.
+This tool automates n-way blocking of free/busy time between all calendar accounts (e.g., Office 365, Google, iCloud) configured in the **classic** Outlook for Windows desktop application. As long as a calendar is visible in the Outlook desktop client, this tool can sync with it. It creates "blocker" appointments to prevent double-bookings, cleaning up stale blockers and handling recurring meetings gracefully.
 
 It runs entirely on the desktop (no cloud dependencies), uses only Outlook COM interop, and supports:
 
@@ -37,9 +37,9 @@ It runs entirely on the desktop (no cloud dependencies), uses only Outlook COM i
 
 ---
 
-## Features
+## ✨ Features
 
-- **N-way sync** between all tenant calendars
+- **N-way sync** between all configured calendars
 - **Date window** specification (`--startdate`, `--days`)
 - **Background mode** (`--background`) for hourly running
 - **Test mode** (`--test`) to print operations without modifying
@@ -51,7 +51,7 @@ It runs entirely on the desktop (no cloud dependencies), uses only Outlook COM i
 
 ---
 
-## Prerequisites
+## ✅ Prerequisites
 
 - Windows OS with **classic Outlook** (desktop) installed
 - .NET 9 SDK
@@ -60,7 +60,7 @@ It runs entirely on the desktop (no cloud dependencies), uses only Outlook COM i
 
 ---
 
-## Installation
+## 🚀 Installation
 
 1. **Clone the repository:**
    ```bash
@@ -75,9 +75,9 @@ It runs entirely on the desktop (no cloud dependencies), uses only Outlook COM i
 
 ---
 
-## Configuration & CLI Usage
+## ⚙️ Configuration & CLI Usage
 
-### Command-Line Options
+### ⌨️ Command-Line Options
 
 | Flag                 | Type       | Default              | Description                                                        |
 | -------------------- | ---------- | -------------------- | ------------------------------------------------------------------ |
@@ -87,7 +87,7 @@ It runs entirely on the desktop (no cloud dependencies), uses only Outlook COM i
 | `-t`, `--test`       | boolean    | `false`              | Test mode: print planned creates/deletes without modifying Outlook |
 | `-r`, `--reset`      | boolean    | `false`              | Delete all blockers created by this tool and exit                  |
 
-### Examples
+### 💡 Examples
 
 - **One-off sync next 60 days:**
 
@@ -115,9 +115,9 @@ It runs entirely on the desktop (no cloud dependencies), uses only Outlook COM i
 
 ---
 
-## How It Works
+## 🧠 How It Works
 
-### Architecture
+### 🏗️ Architecture
 
 1. **Entrypoint (Program.cs)** parses CLI options using System.CommandLine.
 2. **Mutex** ensures only one instance runs.
@@ -129,7 +129,7 @@ It runs entirely on the desktop (no cloud dependencies), uses only Outlook COM i
    - Deduplication of occurrences
    - Creation and deletion of blockers tagged by `BlockerTag` property
 
-### Sync Algorithm
+### 🔄 Sync Algorithm
 
 1. **Gather all real meetings** from all accounts into a master list, excluding any appointments already marked as blockers.
 2. **For each account (as a target):**
@@ -145,7 +145,7 @@ It runs entirely on the desktop (no cloud dependencies), uses only Outlook COM i
 
 ---
 
-## Troubleshooting
+## 🛠️ Troubleshooting
 
 - **COM exceptions**: Ensure Outlook Classic is running and accounts are logged in.
 - **Office DLL not found**: Embed interop types or target `net48` if you rely on GAC.
@@ -154,7 +154,7 @@ It runs entirely on the desktop (no cloud dependencies), uses only Outlook COM i
 
 ---
 
-## Contributing
+## 🤝 Contributing
 
 1. Fork the repo and create your branch: `git checkout -b feature/YourFeature`
 2. Commit your changes: `git commit -m "Add new feature..."`
@@ -165,6 +165,13 @@ Please follow the existing coding style, include unit tests for new logic, and u
 
 ---
 
-## License
+## 📄 License
 
 [MIT License](LICENSE.txt)
+
+---
+
+## 🔮 Future Ideas
+
+- Configure if blockers are created for tentative and out-of-office entries.
+- Don't create a blocker for times that are already covered by a bigger (longer) blocker.
