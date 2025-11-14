@@ -133,15 +133,15 @@ It runs entirely on the desktop (no cloud dependencies), uses only Outlook COM i
 
 1. **Gather all real meetings** from all accounts into a master list, excluding any appointments already marked as blockers.
 2. **For each account (as a target):**
-    a. **Identify existing blockers** in the target account's calendar, deduplicating any that share the same unique ID.
-    b. **Iterate through the master list of real meetings:**
-        i. Skip if the meeting belongs to the current target account.
-        ii. Skip if a valid blocker for this meeting already exists.
-        iii. Skip all-day, non-busy, or subjects containing "block".
-        iv. Skip if an equivalent real meeting already exists in the target calendar (e.g., the user is an attendee on multiple accounts).
-        v. Skip meetings with zero duration.
-        vi. If none of the above apply, create a new blocker appointment.
-    c. **Remove stale blockers:** Any blockers found in step 2a that were not matched with a real meeting in step 2b are deleted.
+  - a. **Identify existing blockers** in the target account's calendar, deduplicating any that share the same unique ID.
+  - b. **Iterate through the master list of real meetings:**
+    - i. Skip if the meeting belongs to the current target account.
+    - ii. Skip if a valid blocker for this meeting already exists.
+    - iii. Skip all-day, non-busy, or subjects containing "block".
+    - iv. Skip if an equivalent real meeting already exists in the target calendar (e.g., the user is an attendee on multiple accounts).
+    - v. Skip meetings with zero duration.
+    - vi. If none of the above apply, create a new blocker appointment.
+  - c. **Remove stale blockers:** Any blockers found in step 2a that were not matched with a real meeting in step 2b are deleted.
 
 ---
 
@@ -174,4 +174,4 @@ Please follow the existing coding style, include unit tests for new logic, and u
 ## 🔮 Future Ideas
 
 - Configure if blockers are created for tentative and out-of-office entries.
-- Don't create a blocker for times that are already covered by a bigger (longer) blocker.
+- Don't create a blocker for times that are already covered by a bigger (longer) blocker (and verify that blockers are detected by the UID, not the title).
