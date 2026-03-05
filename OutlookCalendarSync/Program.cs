@@ -13,7 +13,8 @@ using System.CommandLine.Invocation;
 const string BlockerTag = "MySyncToolId";
 
 /// <summary>
-/// Removes any prefix before the first ':' and any bracketed tag or word: at the start.
+/// Removes any prefix before the first ':' and any bracketed tag or word: at the start,
+/// including the "Blocker" prefix.
 /// </summary>
 static string NormalizeSubject(string rawSubject)
 {
@@ -23,13 +24,33 @@ static string NormalizeSubject(string rawSubject)
     string afterColon = colonIndex >= 0
         ? rawSubject[(colonIndex + 1)..]
         : rawSubject;
-    // Strip any leading [TAG] or word: prefix
+    // Strip any leading [TAG] or word: prefix, or "Blocker" prefix
     return System.Text.RegularExpressions.Regex.Replace(
         afterColon.Trim(),
-        "^(?:\\[[^\\]]*\\]|\\w+:)\\s*",
+        "^(?:\\[[^\\]]*\\]|\\w+:|Blocker\\s+)\\s*",
         string.Empty,
         System.Text.RegularExpressions.RegexOptions.IgnoreCase
     ).Trim();
+}
+
+/// <summary>
+/// Determines if an appointment should be synchronized as a blocker.
+/// </summary>
+static bool IsSyncable(Outlook.AppointmentItem appt)
+{
+    if (appt.Start == appt.End) return false;
+
+    bool isOOO = appt.BusyStatus == Outlook.OlBusyStatus.olOutOfOffice;
+    bool isBusy = appt.BusyStatus == Outlook.OlBusyStatus.olBusy;
+    bool isManualBlocker = (appt.Subject ?? string.Empty).TrimStart().StartsWith("Blocker", StringComparison.OrdinalIgnoreCase);
+
+    // Sync if it's Busy, OOO, or a manual Blocker
+    if (!isBusy && !isOOO && !isManualBlocker) return false;
+
+    // Skip all-day events unless it's OOO or an explicit manual blocker
+    if (appt.AllDayEvent && !isOOO && !isManualBlocker) return false;
+
+    return true;
 }
 
 // Define CLI options
@@ -261,11 +282,8 @@ void SynchronizeAllAccounts(
                 continue;
             }
 
-            // Skip all-day events, non-busy meetings, or subjects containing "block"
-            if (realMeeting.AllDayEvent ||
-                realMeeting.BusyStatus != Outlook.OlBusyStatus.olBusy ||
-                (realMeeting.Subject ?? string.Empty).IndexOf("block", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                realMeeting.Start == realMeeting.End)
+            // Skip meetings that are not syncable (e.g. Free, most All-Day)
+            if (!IsSyncable(realMeeting))
             {
                 continue;
             }
@@ -292,7 +310,7 @@ void SynchronizeAllAccounts(
                 blocker.Start = realMeeting.Start;
                 blocker.End = realMeeting.End;
                 blocker.AllDayEvent = realMeeting.AllDayEvent;
-                blocker.BusyStatus = Outlook.OlBusyStatus.olBusy;
+                blocker.BusyStatus = realMeeting.BusyStatus;
                 blocker.ReminderSet = false;
                 blocker.UserProperties.Add(BlockerTag, Outlook.OlUserPropertyType.olText).Value = globalId;
                 blocker.Save();
@@ -306,10 +324,7 @@ void SynchronizeAllAccounts(
             bool shouldDelete = false;
             if (allRealMeetings.TryGetValue(key, out var realMeeting))
             {
-                if (realMeeting.AllDayEvent ||
-                    realMeeting.BusyStatus != Outlook.OlBusyStatus.olBusy ||
-                    (realMeeting.Subject ?? string.Empty).IndexOf("block", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                    realMeeting.Start == realMeeting.End)
+                if (!IsSyncable(realMeeting))
                 {
                     shouldDelete = true;
                 }
@@ -369,23 +384,16 @@ bool FindEquivalentMeeting(Outlook.AppointmentItem sourceMeeting, Outlook.Accoun
             continue;
         }
 
+        // Only consider syncable (blocking) meetings as equivalent
+        if (!IsSyncable(targetMeeting))
+        {
+            Marshal.ReleaseComObject(targetMeeting);
+            continue;
+        }
+
         if (sourceMeeting.Start == targetMeeting.Start && sourceMeeting.End == targetMeeting.End)
         {
-            string targetSubject = NormalizeSubject(targetMeeting.Subject ?? string.Empty);
-            int suffixLength = Math.Min(targetSubject.Length, sourceSubject.Length);
-            if (suffixLength > 0)
-            {
-                string sourceSuffix = sourceSubject[^suffixLength..];
-                string targetSuffix = targetSubject[^suffixLength..];
-                if (string.Equals(sourceSuffix, targetSuffix, StringComparison.OrdinalIgnoreCase))
-                {
-                    found = true;
-                }
-            }
-            else if (string.IsNullOrEmpty(sourceSubject) && string.IsNullOrEmpty(targetSubject))
-            {
-                found = true; // Both subjects are empty, consider them equivalent
-            }
+            found = true;
         }
         Marshal.ReleaseComObject(targetMeeting);
         if(found) break;

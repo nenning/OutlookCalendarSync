@@ -44,9 +44,12 @@ It runs entirely on the desktop (no cloud dependencies), uses only Outlook COM i
 - **Background mode** (`--background`) for hourly running
 - **Test mode** (`--test`) to print operations without modifying
 - **Reset mode** (`--reset`) to delete all created blockers
-- **Skips** user-created events, "block" meetings, and blockers with rooms
+- **Automatic Blocker Identification**: Treats meetings starting with "Blocker " as blockers even without the tool's hidden ID.
+- **Out of Office (OOO) Syncing**: Synchronizes OOO entries as blockers, preserving their OOO status.
+- **Privacy**: Created blockers are named "Blocker", the don't contain the original subject and content.
+- **Smart Deduplication**: Skips creating blockers if the time slot is already occupied by an equivalent meeting (same start/end time).
+- **Skips** free meetings and blockers with rooms.
 - **Recurring handling** with per-occurrence logic
-- **Deduplication** of multiple identical occurrences
 - **Single-instance enforcement** via named mutex
 
 ---
